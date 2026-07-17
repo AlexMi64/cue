@@ -177,6 +177,15 @@ Run `xattr -cr /Applications/cue.app` in Terminal once (see Install → Option A
 
 Issues and PRs welcome. cue is intentionally small and readable — `main.js` (app + capture + AI), `renderer/` (the UI), `src/` (providers). No build step for the source (plain HTML/CSS/JS).
 
+### Platform Support
+- [x] **macOS** (Fully Supported)
+- [x] **Windows** (Fully Supported)
+- [ ] **Linux** (Untested)
+
+### Features Open for Contribution
+- [ ] Upgrade audio capture pipeline for zero-latency streaming
+- [ ] Add optional Deepgram support for ultra-fast transcription
+
 ## Credits & license
 
 Built as an open-source study of how tools like **Cluely** and **Interview Coder** work. Modeled on the open-source clones `pickle-com/glass` and `sohzm/cheating-daddy`.

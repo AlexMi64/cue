@@ -35,6 +35,17 @@ function load() {
   if (data) return data;
   try { data = deepMerge(DEFAULTS, JSON.parse(fs.readFileSync(FILE, 'utf8'))); }
   catch { data = deepMerge(DEFAULTS, {}); }
+  
+  // Auto-switch provider if the current one has no key, but another one does.
+  if (!data.apiKeys[data.provider]) {
+    const validProviders = ['openai', 'anthropic', 'gemini', 'nvidia'];
+    const active = validProviders.find(p => data.apiKeys[p]);
+    if (active) {
+      data.provider = active;
+      // We don't save() here so we don't spam disk, it will persist on next save.
+    }
+  }
+  
   return data;
 }
 function save() { try { fs.writeFileSync(FILE, JSON.stringify(data, null, 2)); } catch (e) { /* ignore */ } }
