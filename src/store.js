@@ -8,12 +8,12 @@ const FILE = path.join(app.getPath('userData'), 'cue-data.json');
 const DEFAULTS = {
   provider: 'openai',
   smart: false,
-  apiKeys: { openai: '', anthropic: '', gemini: '', deepgram: '', nvidia: '' },
+  apiKeys: { openai: '', anthropic: '', gemini: '', deepgram: '' },
+  baseURLs: { openai: '', gemini: '' },
   models: {
     openai: { fast: 'gpt-4o-mini', smart: 'gpt-4o' },
     anthropic: { fast: 'claude-3-5-haiku-latest', smart: 'claude-3-5-sonnet-latest' },
-    gemini: { fast: 'gemini-2.5-flash', smart: 'gemini-2.5-pro' },
-    nvidia: { fast: 'meta/llama-3.2-11b-vision-instruct', smart: 'meta/llama-3.2-90b-vision-instruct' }
+    gemini: { fast: 'gemini-3-flash', smart: 'gemini-3-flash' }
   }
 };
 
@@ -35,17 +35,6 @@ function load() {
   if (data) return data;
   try { data = deepMerge(DEFAULTS, JSON.parse(fs.readFileSync(FILE, 'utf8'))); }
   catch { data = deepMerge(DEFAULTS, {}); }
-  
-  // Auto-switch provider if the current one has no key, but another one does.
-  if (!data.apiKeys[data.provider]) {
-    const validProviders = ['openai', 'anthropic', 'gemini', 'nvidia'];
-    const active = validProviders.find(p => data.apiKeys[p]);
-    if (active) {
-      data.provider = active;
-      // We don't save() here so we don't spam disk, it will persist on next save.
-    }
-  }
-  
   return data;
 }
 function save() { try { fs.writeFileSync(FILE, JSON.stringify(data, null, 2)); } catch (e) { /* ignore */ } }

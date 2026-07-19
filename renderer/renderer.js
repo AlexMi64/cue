@@ -3,8 +3,6 @@
   const { icon } = window.ICONS;
   const cue = window.cue; // exposed by preload
   const $ = (s) => document.querySelector(s);
-  const cmdKey = cue.platform === 'darwin' ? '⌘' : 'Ctrl';
-  const isCmdOrCtrl = (e) => cue.platform === 'darwin' ? e.metaKey : e.ctrlKey;
 
   // ---- paint icons -------------------------------------------------------
   $('#logo-btn').innerHTML = icon('logo', { size: 18 });
@@ -122,8 +120,8 @@
   }
   $('#send-btn').addEventListener('click', send);
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !isCmdOrCtrl(e)) { e.preventDefault(); send(); }
-    if (e.key === 'Enter' && isCmdOrCtrl(e)) { e.preventDefault(); runMode('assist', ''); }
+    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey) { e.preventDefault(); send(); }
+    if (e.key === 'Enter' && e.metaKey) { e.preventDefault(); runMode('assist', ''); }
   });
 
   // Smart toggle
@@ -156,18 +154,22 @@
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
       audioCtx = new AudioContext({ sampleRate: 16000 });
-      await audioCtx.audioWorklet.addModule('./pcm-processor.js');
       micNode = audioCtx.createMediaStreamSource(micStream);
-      micProc = new AudioWorkletNode(audioCtx, 'pcm-processor');
-      micProc.port.onmessage = (e) => cue.micPcm(e.data);
+      micProc = audioCtx.createScriptProcessor(4096, 1, 1);
       const sink = audioCtx.createGain(); sink.gain.value = 0; // run processor silently
       micNode.connect(micProc); micProc.connect(sink); sink.connect(audioCtx.destination);
+      micProc.onaudioprocess = (e) => {
+        const f = e.inputBuffer.getChannelData(0);
+        const out = new Int16Array(f.length);
+        for (let i = 0; i < f.length; i++) { const s = Math.max(-1, Math.min(1, f[i])); out[i] = s < 0 ? s * 0x8000 : s * 0x7fff; }
+        cue.micPcm(out.buffer);
+      };
     } catch (err) {
       cue.log('mic error: ' + (err && err.message));
     }
   }
   function stopMic() {
-    if (micProc) { micProc.port.onmessage = null; micProc.disconnect(); micProc = null; }
+    if (micProc) { micProc.disconnect(); micProc.onaudioprocess = null; micProc = null; }
     if (micNode) { micNode.disconnect(); micNode = null; }
     if (audioCtx) { audioCtx.close(); audioCtx = null; }
     if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
@@ -184,19 +186,23 @@
       if (!tracks.length) { cue.log('system audio: no loopback track (macOS loopback unsupported here)'); stream.getTracks().forEach((t) => t.stop()); return; }
       sysStream = stream;
       sysCtx = new AudioContext({ sampleRate: 16000 });
-      await sysCtx.audioWorklet.addModule('./pcm-processor.js');
       sysNode = sysCtx.createMediaStreamSource(new MediaStream(tracks));
-      sysProc = new AudioWorkletNode(sysCtx, 'pcm-processor');
-      sysProc.port.onmessage = (e) => cue.systemPcm(e.data);
+      sysProc = sysCtx.createScriptProcessor(4096, 1, 1);
       const sink = sysCtx.createGain(); sink.gain.value = 0;
       sysNode.connect(sysProc); sysProc.connect(sink); sink.connect(sysCtx.destination);
+      sysProc.onaudioprocess = (e) => {
+        const f = e.inputBuffer.getChannelData(0);
+        const out = new Int16Array(f.length);
+        for (let i = 0; i < f.length; i++) { const s = Math.max(-1, Math.min(1, f[i])); out[i] = s < 0 ? s * 0x8000 : s * 0x7fff; }
+        cue.systemPcm(out.buffer);
+      };
       cue.log('system audio: capturing loopback');
     } catch (err) {
       cue.log('system audio error: ' + (err && err.message));
     }
   }
   function stopSystemAudio() {
-    if (sysProc) { sysProc.port.onmessage = null; sysProc.disconnect(); sysProc = null; }
+    if (sysProc) { sysProc.disconnect(); sysProc.onaudioprocess = null; sysProc = null; }
     if (sysNode) { sysNode.disconnect(); sysNode = null; }
     if (sysCtx) { sysCtx.close(); sysCtx = null; }
     if (sysStream) { sysStream.getTracks().forEach((t) => t.stop()); sysStream = null; }
@@ -243,22 +249,22 @@
   $('#more-btn').addEventListener('click', openSettings);
   $('#s-close').addEventListener('click', closeSettings);
   scrim.addEventListener('click', (e) => { if (e.target === scrim) closeSettings(); });
+  cue.on('settings:open', openSettings);
 
   function fillSettings() {
     document.querySelectorAll('#provider-seg button').forEach((b) => b.classList.toggle('on', b.dataset.provider === settings.provider));
     $('#key-openai').value = settings.apiKeys.openai || '';
     $('#key-anthropic').value = settings.apiKeys.anthropic || '';
     $('#key-gemini').value = settings.apiKeys.gemini || '';
-    $('#key-nvidia').value = settings.apiKeys.nvidia || '';
     const m = settings.models[settings.provider] || { fast: '', smart: '' };
     $('#model-fast').value = m.fast; $('#model-smart').value = m.smart;
     $('#s-status').textContent = statusText();
   }
   function statusText() {
     const k = settings.apiKeys;
-    const has = [k.openai && 'OpenAI', k.anthropic && 'Anthropic', k.gemini && 'Gemini', k.nvidia && 'Nvidia'].filter(Boolean);
+    const has = [k.openai && 'OpenAI', k.anthropic && 'Anthropic', k.gemini && 'Gemini'].filter(Boolean);
     const stt = k.openai ? 'Whisper' : (k.gemini ? 'Gemini' : 'none');
-    return 'Active: ' + settings.provider + ' · keys: ' + (has.join(', ') || 'none set') + ' · transcription: ' + stt;
+    return 'Активен: ' + settings.provider + ' · ключи: ' + (has.join(', ') || 'не заданы') + ' · распознавание: ' + stt;
   }
   document.querySelectorAll('#provider-seg button').forEach((b) => b.addEventListener('click', () => {
     settings.provider = b.dataset.provider;
@@ -271,7 +277,6 @@
     settings.apiKeys.openai = $('#key-openai').value.trim();
     settings.apiKeys.anthropic = $('#key-anthropic').value.trim();
     settings.apiKeys.gemini = $('#key-gemini').value.trim();
-    settings.apiKeys.nvidia = $('#key-nvidia').value.trim();
     if (!settings.models[settings.provider]) settings.models[settings.provider] = {};
     settings.models[settings.provider].fast = $('#model-fast').value.trim();
     settings.models[settings.provider].smart = $('#model-smart').value.trim();
@@ -281,7 +286,7 @@
   // ---- example conversation (matches the reference screenshot) ------------
   function showExample() {
     clearMessages();
-    addUserBubble('What should I say?');
+    addUserBubble('Что сказать?');
     const ai = document.createElement('div');
     ai.className = 'ai-text';
     ai.textContent = '“A discounted cash flow model values a company by projecting future free cash flows and discounting them to present value using the weighted average cost of capital.”';
@@ -291,19 +296,8 @@
   // ---- global keys -------------------------------------------------------
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !scrim.classList.contains('hidden')) closeSettings();
-    if (isCmdOrCtrl(e)) {
-      if (e.key === ',') { e.preventDefault(); openSettings(); }
-    }
+    if (e.metaKey && e.key === ',') { e.preventDefault(); openSettings(); }
   });
-
-  // UI Zoom buttons (text only)
-  let currentZoom = 1;
-  function updateZoom(delta) {
-    currentZoom = Math.max(0.5, Math.min(3, currentZoom + delta));
-    document.documentElement.style.setProperty('--text-zoom', currentZoom);
-  }
-  $('#zoom-in-btn').addEventListener('click', () => updateZoom(0.1));
-  $('#zoom-out-btn').addEventListener('click', () => updateZoom(-0.1));
 
   // ---- click-through: only the UI blocks the mouse; empty gaps pass to your screen ----
   let ignoring = null;
@@ -320,35 +314,33 @@
   const OB_STEPS = [
     {
       icon: '👋',
-      title: 'Welcome to cue',
-      body: 'cue is a private AI copilot that floats over your screen. It can <strong>see your screen</strong>, <strong>hear your meetings</strong>, and help you answer questions or solve coding problems — while staying hidden from most screen shares.<br><br>This quick guide gets you running in about a minute.'
+      title: 'Добро пожаловать в cue',
+      body: 'cue — это приватный ИИ-помощник поверх экрана. Он может <strong>видеть экран</strong>, <strong>слышать разговоры</strong> и помогать отвечать на вопросы или решать задачи — оставаясь скрытым в большинстве трансляций экрана.<br><br>Эта короткая инструкция поможет начать работу примерно за минуту.'
     },
-    ...(cue.platform === 'darwin' ? [{
+    {
       icon: '🔐',
-      title: 'Allow cue to see & hear',
-      body: 'cue needs two macOS permissions. Click each button, turn <strong>cue</strong> ON in the window that opens, then come back here.<ul><li><strong>Microphone</strong> — to hear you</li><li><strong>Screen Recording</strong> — to see your screen and hear meeting audio</li></ul>',
+      title: 'Разрешите cue видеть и слышать',
+      body: 'cue нужны два разрешения macOS. Нажмите каждую кнопку, включите <strong>cue</strong> в открывшемся окне и вернитесь сюда.<ul><li><strong>Микрофон</strong> — чтобы слышать вас</li><li><strong>Запись экрана</strong> — чтобы видеть экран и слышать разговор</li></ul>',
       buttons: [
-        { label: 'Open Microphone settings', action: () => cue.openPane('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone') },
-        { label: 'Open Screen Recording settings', action: () => cue.openPane('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture') }
+        { label: 'Открыть настройки микрофона', action: () => cue.openPane('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone') },
+        { label: 'Открыть настройки записи экрана', action: () => cue.openPane('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture') }
       ]
-    }] : []),
+    },
     {
       icon: '🔑',
-      title: 'Connect an AI provider',
-      body: 'cue uses <strong>your own</strong> API key — pick <span class="hl">OpenAI</span>, <span class="hl">Anthropic</span>, <span class="hl">Google Gemini</span>, or <span class="hl">Nvidia</span>. Get a key from your provider, then paste it into cue\'s Settings.<br><br><strong>Tip:</strong> the listening features need speech-to-text access (an OpenAI key with Whisper, or a Gemini key). A chat-only key still powers screen &amp; coding help.',
-      buttons: [{ label: 'Open cue Settings', action: () => { finishOnboard(); openSettings(); } }]
+      title: 'Подключите провайдера ИИ',
+      body: 'cue использует <strong>ваш собственный</strong> ключ API — выберите <span class="hl">OpenAI</span>, <span class="hl">Anthropic</span> или <span class="hl">Google Gemini</span>. Получите ключ у провайдера и вставьте его в настройки cue.<br><br><strong>Важно:</strong> для прослушивания нужен доступ к распознаванию речи (ключ OpenAI с Whisper или ключ Gemini). Ключ только для чата всё равно позволит работать с экраном и кодом.',
+      buttons: [{ label: 'Открыть настройки cue', action: () => { finishOnboard(); openSettings(); } }]
     },
     {
       icon: '🫥',
-      title: 'Stay hidden in Zoom',
-      body: cue.platform === 'darwin'
-        ? 'cue is hidden from most screen shares automatically (Google Meet, Teams, QuickTime — nothing to do). <strong>Zoom needs one setting:</strong><br><br>Zoom → <span class="hl">Settings</span> → <span class="hl">Share Screen</span> → <span class="hl">Advanced</span> → <strong>Screen capture mode</strong> → choose <strong>“Advanced capture with window filtering.”</strong><br><br>Avoid “<strong>without</strong> window filtering” — that mode reveals cue.'
-        : 'cue is hidden from screen shares automatically. <strong>For Zoom:</strong><br><br>Zoom → <span class="hl">Settings</span> → <span class="hl">Share Screen</span> → <span class="hl">Advanced</span> → <strong>Screen capture mode</strong> → choose <strong>“Advanced capture with window filtering.”</strong>'
+      title: 'Оставайтесь скрытым в Zoom',
+      body: 'cue автоматически скрыт в большинстве трансляций экрана (Google Meet, Teams, QuickTime — ничего настраивать не нужно). <strong>Для Zoom нужна одна настройка:</strong><br><br>Zoom → <span class="hl">Настройки</span> → <span class="hl">Демонстрация экрана</span> → <span class="hl">Расширенные</span> → <strong>Режим захвата экрана</strong> → выберите <strong>«Расширенный захват с фильтрацией окон».</strong><br><br>Не выбирайте режим <strong>без</strong> фильтрации окон — тогда cue будет виден.'
     },
     {
       icon: '✨',
-      title: 'You’re all set',
-      body: `How to use cue:<ul><li><span class="kbd">${cmdKey}</span> <span class="kbd">↵</span> — <strong>Assist</strong> with whatever's on screen or being said</li><li><span class="kbd">${cmdKey}</span> <span class="kbd">H</span> — solve a coding problem on screen</li><li>Click <strong>▢</strong> in the top bar to start listening to a meeting</li><li>Type a question and press <span class="kbd">↵</span></li></ul>Reopen this guide anytime by clicking the <strong>cue logo</strong>. Quit with <span class="kbd">${cmdKey}</span><span class="kbd">⇧</span><span class="kbd">X</span>.`
+      title: 'Всё готово',
+      body: 'Как пользоваться cue:<ul><li><span class="kbd">⌘</span> <span class="kbd">↵</span> — <strong>помощь</strong> по экрану или разговору</li><li><span class="kbd">⌘</span> <span class="kbd">H</span> — решить задачу на экране</li><li>Нажмите <strong>▢</strong> на верхней панели, чтобы начать прослушивание</li><li>Введите вопрос и нажмите <span class="kbd">↵</span></li></ul>Открыть инструкцию снова можно нажатием на <strong>логотип cue</strong>. Выход — <span class="kbd">⌘</span><span class="kbd">⇧</span><span class="kbd">X</span>.'
     }
   ];
   let obIndex = 0;
@@ -362,7 +354,7 @@
     const dots = $('#ob-dots'); dots.innerHTML = '';
     OB_STEPS.forEach((_, i) => { const d = document.createElement('span'); if (i === obIndex) d.className = 'on'; dots.appendChild(d); });
     $('#ob-back').style.visibility = obIndex === 0 ? 'hidden' : 'visible';
-    $('#ob-next').textContent = obIndex === OB_STEPS.length - 1 ? 'Done' : 'Next';
+    $('#ob-next').textContent = obIndex === OB_STEPS.length - 1 ? 'Готово' : 'Далее';
     $('#ob-skip').style.visibility = obIndex === OB_STEPS.length - 1 ? 'hidden' : 'visible';
   }
   function showOnboard() { obIndex = 0; renderOnboard(); obScrim.classList.remove('hidden'); setIgnore(false); }
@@ -378,9 +370,6 @@
   // ---- boot --------------------------------------------------------------
   (async function boot() {
     settings = await cue.settingsGet();
-    if (cue.platform !== 'darwin') {
-      $('#placeholder').innerHTML = 'Ask about your screen or conversation, or <span class="keycap">Ctrl</span><span class="keycap">⏎</span> for Assist';
-    }
     smartBtn.classList.toggle('on', !!settings.smart);
     showExample();
     syncPlaceholder();
@@ -388,10 +377,5 @@
     $('#live-dot').classList.toggle('off', !st.active);
     $('#stop-btn').classList.toggle('active', st.active);
     if (!settings.onboarded) showOnboard();
-
-    if (cue.platform === 'win32') {
-      const keycaps = document.querySelectorAll('#placeholder .keycap');
-      if (keycaps.length > 0) keycaps[0].textContent = 'Ctrl';
-    }
   })();
 })();

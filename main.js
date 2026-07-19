@@ -1,5 +1,4 @@
-const DEBUG = false; // Set to false to disable debug logging
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, session, desktopCapturer, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, screen, session, desktopCapturer, shell } = require('electron');
 const path = require('path');
 const store = require('./src/store');
 const { captureScreenshot } = require('./src/screen');
@@ -9,6 +8,7 @@ const { MODES } = require('./src/prompts');
 const { rms16 } = require('./src/wav');
 
 let win = null;
+let tray = null;
 
 // -------- capture / transcript state --------
 const state = { capturing: false, busy: false, transcribing: { you: false, them: false } };
@@ -21,6 +21,41 @@ const RMS_GATE = 240;
 let flushTimer = null;
 
 function send(channel, data) { if (win && !win.isDestroyed()) win.webContents.send(channel, data); }
+
+function toggleWindow() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isVisible()) win.hide();
+  else { win.showInactive(); win.focus(); }
+  updateTrayMenu();
+}
+
+function hideToTray() {
+  if (!win || win.isDestroyed()) return;
+  win.hide();
+  updateTrayMenu();
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  const visible = !!(win && !win.isDestroyed() && win.isVisible());
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: visible ? 'Скрыть cue' : 'Показать cue', click: toggleWindow },
+    { label: 'Настройки', click: () => { if (win && !win.isDestroyed()) { win.showInactive(); send('settings:open'); } } },
+    { type: 'separator' },
+    { label: 'Выйти', click: () => app.quit() }
+  ]));
+}
+
+function createTray() {
+  if (tray) return;
+  const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAAAUklEQVR4nM2TwQoAIAhDXf//z+uc6ZIocFfnc6CadRNUkSQXM5D6UQF4RUAoiG+gqG2QU5rMN+y1WEyT+Z8lGu1A/baGaNrNQeLbi5gAyrdopwlK7E/hnNmM7QAAAABJRU5ErkJggg==')
+    .resize({ width: 18, height: 18 });
+  tray = new Tray(icon);
+  tray.setToolTip('cue');
+  tray.on('click', toggleWindow);
+  tray.on('right-click', updateTrayMenu);
+  updateTrayMenu();
+}
 
 // -------- window --------
 function createWindow() {
@@ -48,13 +83,9 @@ function createWindow() {
 
   // Invisibility + overlay behavior. Set CUE_NO_PROTECT=1 to disable for debugging.
   win.setContentProtection(!process.env.CUE_NO_PROTECT);            // excluded from screen capture (best-effort)
-  if (process.platform === 'darwin') {
-    win.setAlwaysOnTop(true, 'screen-saver', 1);
-    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    if (typeof win.setHiddenInMissionControl === 'function') win.setHiddenInMissionControl(true);
-  } else {
-    win.setAlwaysOnTop(true);
-  }
+  win.setAlwaysOnTop(true, 'screen-saver', 1);
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  if (typeof win.setHiddenInMissionControl === 'function') win.setHiddenInMissionControl(true);
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
@@ -88,7 +119,6 @@ async function flushChannel(channel) {
     if (res.text && res.text.trim()) {
       const turn = { channel, text: res.text.trim(), ts: Date.now() };
       transcript.push(turn);
-      if (DEBUG) console.log(`[TRANSCRIPT] ${channel === 'you' ? 'You' : 'Them'}:`, turn.text);
       send('transcript', turn);
     }
   } catch (e) {
@@ -134,49 +164,34 @@ function setCapturing(active) {
 
 // -------- feature runner --------
 async function runFeature(mode, userText) {
-  if (DEBUG) console.log('[DEBUG MAIN] runFeature called:', { mode, userText, isBusy: state.busy });
   if (state.busy) return;
   const def = MODES[mode];
-  if (!def) {
-    if (DEBUG) console.log('[DEBUG MAIN] mode not found:', mode);
-    return;
-  }
+  if (!def) return;
   state.busy = true;
   try {
     const settings = store.getSettings();
     const llm = createLLM(settings);
     const userBubble = def.userBubble !== null ? def.userBubble : (mode === 'ask' ? userText : null);
-    if (DEBUG) console.log('[DEBUG MAIN] LLM settings loaded:', { provider: settings.provider, smart: settings.smart });
     send('llm:start', { userBubble, small: !!def.small });
 
     if (!llm.ready) {
-      if (DEBUG) console.log('[DEBUG MAIN] LLM not ready (missing key or model).');
       send('llm:error', { message: 'Add your ' + settings.provider + ' API key in Settings (gear icon) to start. Model: ' + (llm.model || 'unset') + '.' });
       return;
     }
 
     let imageDataUrl = null;
     if (def.needsScreen) {
-      if (DEBUG) console.log('[DEBUG MAIN] Feature needs screen. Capturing screenshot...');
-      try { 
-        imageDataUrl = await captureScreenshot(); 
-        if (DEBUG) console.log('[DEBUG MAIN] Screenshot captured successfully (length:', imageDataUrl.length, ')');
-      }
-      catch (e) { 
-        if (DEBUG) console.error('[DEBUG MAIN] Screenshot capture failed:', e);
-        send('status', { message: 'Screen capture needs permission — grant Screen Recording to cue in System Settings.' }); 
-      }
+      try { imageDataUrl = await captureScreenshot(); }
+      catch (e) { send('status', { message: 'Screen capture needs permission — grant Screen Recording to cue in System Settings.' }); }
     }
 
     const built = def.build({ transcript, userText: userText || '' });
-    if (DEBUG) console.log('[DEBUG MAIN] Built prompt. Starting LLM stream...');
-    const fullText = await llm.stream({
+    await llm.stream({
       system: def.system,
       turns: [{ role: 'user', text: built }],
       imageDataUrl,
       onToken: (t) => send('llm:token', { text: t })
     });
-    if (DEBUG) console.log('[DEBUG MAIN] Full LLM Output:\n', fullText);
     send('llm:done', {});
   } catch (e) {
     send('llm:error', { message: 'Error: ' + (e && e.message ? e.message : String(e)) });
@@ -195,12 +210,15 @@ ipcMain.on('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) buffers.you.pu
 ipcMain.on('system:pcm', (_e, arrayBuffer) => { if (state.capturing) buffers.them.push(Buffer.from(arrayBuffer)); });
 ipcMain.on('mouse:ignore', (_e, v) => { if (win) win.setIgnoreMouseEvents(!!v, { forward: true }); });
 ipcMain.on('open-pane', (_e, url) => { shell.openExternal(url).catch(() => {}); });
+ipcMain.on('settings:open', () => send('settings:open'));
+ipcMain.on('window:hide-to-tray', hideToTray);
 ipcMain.on('log', (_e, msg) => console.log('[renderer]', msg));
 
 // -------- shortcuts --------
 function registerShortcuts() {
   globalShortcut.register('CommandOrControl+Return', () => runFeature('assist', ''));
   globalShortcut.register('CommandOrControl+H', () => runFeature('leetcode', ''));
+  globalShortcut.register('CommandOrControl+Shift+T', hideToTray);
   globalShortcut.register('CommandOrControl+Shift+X', () => app.quit());
 }
 
@@ -222,6 +240,7 @@ app.whenReady().then(() => {
   }, { useSystemPicker: false });
 
   createWindow();
+  createTray();
   registerShortcuts();
 
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

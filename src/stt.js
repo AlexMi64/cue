@@ -12,24 +12,26 @@ async function transcribeOpenAI(apiKey, wav, model) {
   return (res.text || '').trim();
 }
 
-async function transcribeGemini(apiKey, wav) {
-  const { GoogleGenAI } = require('@google/genai');
-  const ai = new GoogleGenAI({ apiKey });
-  const res = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: [{ role: 'user', parts: [
-      { text: 'Transcribe this audio verbatim. Return only the spoken words with no commentary. If there is no clear speech, return an empty response.' },
-      { inlineData: { mimeType: 'audio/wav', data: wav.toString('base64') } }
-    ] }]
+async function transcribeGemini(apiKey, wav, baseURL, model) {
+  const OpenAI = require('openai');
+  const client = new OpenAI({ apiKey, baseURL: baseURL || undefined });
+  const res = await client.chat.completions.create({
+    model: model || 'gemini-3-flash',
+    messages: [{ role: 'user', content: [
+      { type: 'text', text: 'Transcribe this audio verbatim. Return only the spoken words with no commentary. If there is no clear speech, return an empty response.' },
+      { type: 'input_audio', input_audio: { data: wav.toString('base64'), format: 'wav' } }
+    ] }],
+    max_tokens: 1400
   });
-  return ((res && res.text) || '').trim();
+  return (((res && res.choices && res.choices[0] && res.choices[0].message && res.choices[0].message.content) || '')).trim();
 }
 
 function createSTT(settings) {
   const keys = settings.apiKeys || {};
   const chain = [];
   if (keys.openai) chain.push({ p: 'openai', fn: (wav) => transcribeOpenAI(keys.openai, wav, settings.sttModel) });
-  if (keys.gemini) chain.push({ p: 'gemini', fn: (wav) => transcribeGemini(keys.gemini, wav) });
+  const baseURLs = settings.baseURLs || {};
+  if (keys.gemini) chain.push({ p: 'gemini', fn: (wav) => transcribeGemini(keys.gemini, wav, baseURLs.gemini, settings.sttModel || 'gemini-3-flash') });
 
   return {
     available: chain.length > 0,
