@@ -181,6 +181,10 @@ async function runFeature(mode, userText) {
 
     let imageDataUrl = null;
     if (def.needsScreen) {
+      if (!state.capturing) {
+        send('llm:error', { message: 'Сначала включите запись, чтобы cue получил доступ к экрану.' });
+        return;
+      }
       try { imageDataUrl = await captureScreenshot(); }
       catch (e) { send('status', { message: 'Screen capture needs permission — grant Screen Recording to cue in System Settings.' }); }
     }

@@ -150,8 +150,7 @@
     $('#live-dot').style.display = collapsed ? 'none' : '';
   });
 
-  // Stop = start/stop listening. Kick off system-audio capture straight from the click so
-  // the user-gesture is fresh for getDisplayMedia (loopback capture needs it).
+  // Start from the click so macOS accepts getDisplayMedia; the state event is deduplicated.
   $('#stop-btn').addEventListener('click', () => {
     const turningOn = !$('#stop-btn').classList.contains('active');
     if (turningOn) startSystemAudio();
@@ -188,8 +187,10 @@
 
   // ---- capture: system/meeting audio (getDisplayMedia loopback, in cue's process) ----
   let sysStream = null, sysCtx = null, sysNode = null, sysProc = null;
+  let sysStarting = false;
   async function startSystemAudio() {
-    if (sysStream) return;
+    if (sysStream || sysStarting) return;
+    sysStarting = true;
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       stream.getVideoTracks().forEach((t) => t.stop()); // we only want the audio
@@ -210,6 +211,8 @@
       cue.log('system audio: capturing loopback');
     } catch (err) {
       cue.log('system audio error: ' + (err && err.message));
+    } finally {
+      sysStarting = false;
     }
   }
   function stopSystemAudio() {
