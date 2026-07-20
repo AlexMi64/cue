@@ -15,7 +15,7 @@ const state = { capturing: false, busy: false, transcribing: { you: false, them:
 let sttDisabled = false; // set when the key can't reach any speech model (stops retry spam)
 const buffers = { you: [], them: [] };
 const transcript = []; // { channel, text, ts }
-const FLUSH_MS = 3500;
+const FLUSH_MS = 2200;
 const MIN_BYTES = Math.floor(16000 * 2 * 0.6); // ~0.6s
 const RMS_GATE = 240;
 let flushTimer = null;
@@ -23,7 +23,7 @@ let captureGeneration = 0;
 const STOP_DRAIN_MS = 300;
 let finalizingGeneration = null;
 const pendingTranscriptions = { you: null, them: null };
-const ASSIST_IDLE_MS = 1200;
+const ASSIST_IDLE_MS = 700;
 let assistActive = false;
 let assistTimer = null;
 let assistQueued = false;
@@ -37,6 +37,27 @@ function shouldCaptureScreen(mode, userText) {
   if (mode !== 'assist' && mode !== 'ask') return false;
   const context = [userText || '', ...transcript.slice(-6).map((turn) => turn.text)].join(' ').toLowerCase();
   return SCREEN_HINTS.some((hint) => context.includes(hint));
+}
+
+const DUPLICATE_WINDOW_MS = 12000;
+function normalizeSpeech(text) {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function isDuplicateTurn(channel, text) {
+  const normalized = normalizeSpeech(text);
+  if (normalized.length < 6) return false;
+  const words = new Set(normalized.split(' '));
+  return transcript.slice(-12).some((previous) => {
+    if (Date.now() - previous.ts > DUPLICATE_WINDOW_MS) return false;
+    const previousNormalized = normalizeSpeech(previous.text);
+    if (normalized === previousNormalized) return true;
+    const previousWords = new Set(previousNormalized.split(' '));
+    if (words.size < 4 || previousWords.size < 4) return false;
+    let intersection = 0;
+    words.forEach((word) => { if (previousWords.has(word)) intersection += 1; });
+    return intersection / (words.size + previousWords.size - intersection) >= 0.78;
+  });
 }
 
 function toggleWindow() {
@@ -138,11 +159,12 @@ async function flushChannel(channel, options = {}) {
         return;
       }
       if ((!state.capturing && !allowStopped) || generation !== captureGeneration) return;
-      if (res.text && res.text.trim()) {
-        const turn = { channel, text: res.text.trim(), ts: Date.now() };
+      const text = res.text && res.text.trim();
+      if (text && !isDuplicateTurn(channel, text)) {
+        const turn = { channel, text, ts: Date.now() };
         transcript.push(turn);
         send('transcript', turn);
-        scheduleAutoAssist();
+        if (channel === 'them') scheduleAutoAssist();
       }
     } catch (e) {
       console.log('[stt] error', e && e.message);
@@ -294,13 +316,14 @@ async function runFeature(mode, userText) {
     }
 
     const built = def.build({ transcript, userText: userText || '' });
-    await llm.stream({
+    const output = await llm.stream({
       system: def.system,
       turns: [{ role: 'user', text: built }],
       imageDataUrl,
       onToken: (t) => send('llm:token', { text: t })
     });
-    send('llm:done', {});
+    const suppress = mode === 'assist' && /^NO_ACTION[.!]?$/i.test(String(output || '').trim());
+    send('llm:done', { suppress });
   } catch (e) {
     send('llm:error', { message: 'Error: ' + (e && e.message ? e.message : String(e)) });
   } finally {

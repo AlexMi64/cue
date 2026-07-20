@@ -18,10 +18,11 @@ async function transcribeGemini(apiKey, wav, baseURL, model) {
   const res = await client.chat.completions.create({
     model: model || 'gemini-3-flash',
     messages: [{ role: 'user', content: [
-      { type: 'text', text: 'Transcribe this audio verbatim. Return only the spoken words with no commentary. If there is no clear speech, return an empty response.' },
+      { type: 'text', text: 'Transcribe this audio verbatim. Return only clearly spoken words, with no commentary or completion. If the audio is silence, noise, music, an echo, or unclear, return an empty response. Never invent or guess words.' },
       { type: 'input_audio', input_audio: { data: wav.toString('base64'), format: 'wav' } }
     ] }],
-    max_tokens: 1400
+    max_tokens: 900,
+    temperature: 0
   });
   return (((res && res.choices && res.choices[0] && res.choices[0].message && res.choices[0].message.content) || '')).trim();
 }

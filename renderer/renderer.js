@@ -83,10 +83,13 @@
     const speaker = document.createElement('span');
     speaker.className = 'transcript-speaker';
     speaker.textContent = turn.channel === 'them' ? 'Собеседник' : 'Вы';
+    const source = document.createElement('span');
+    source.className = 'transcript-source';
+    source.textContent = turn.channel === 'them' ? 'ноутбук' : 'микрофон';
     const time = document.createElement('time');
     time.className = 'transcript-time';
     time.textContent = new Date(turn.ts || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    meta.append(speaker, time);
+    meta.append(speaker, source, time);
 
     const text = document.createElement('div');
     text.className = 'transcript-text';
@@ -133,6 +136,14 @@
     if (!aiEl) return;
     const raw = aiEl.dataset.raw || '';
     aiEl.innerHTML = renderMarkdown(raw);
+    aiEl = null; caretEl = null;
+  }
+
+  function removeAi() {
+    if (!aiEl) return;
+    const marker = aiEl.previousElementSibling;
+    if (marker && marker.classList.contains('answer-label')) marker.remove();
+    aiEl.remove();
     aiEl = null; caretEl = null;
   }
 
@@ -304,7 +315,7 @@
     setBusy(true);
   });
   cue.on('llm:token', ({ text }) => appendToken(text));
-  cue.on('llm:done', () => { finalizeAi(); assistStateEl.textContent = 'Готово'; setBusy(false); });
+  cue.on('llm:done', ({ suppress }) => { if (suppress) removeAi(); else finalizeAi(); assistStateEl.textContent = 'Готово'; setBusy(false); });
   cue.on('llm:error', ({ message }) => {
     if (!aiEl) startAi(true);
     aiEl.dataset.raw = message; finalizeAi(); assistStateEl.textContent = 'Ошибка'; setBusy(false);

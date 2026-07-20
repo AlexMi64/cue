@@ -18,10 +18,12 @@ const MODES = {
       'Use the screenshot when available together with the recent conversation, decide what the user needs RIGHT NOW, and deliver it directly with no preamble. ' +
       'If the screen shows a coding/LeetCode problem: give a short approach, then a correct solution in a fenced code block, then time and space complexity. ' +
       'If it is a conversation: answer the current question or say exactly what the user should say next, in the first person. ' +
+      'Only answer when the latest Them line asks a question, requests a decision, raises an objection, or clearly needs a reply. ' +
+      'If no response is needed, return exactly NO_ACTION. Do not invent missing context or react to background audio. ' +
       'Be concise and confident. Never say "I can see" or describe the screenshot.',
     build(ctx) {
-      const t = formatTranscript(ctx.transcript, 12);
-      return 'Recent conversation:\n' + (t || '(none)') + '\n\nRespond with what I need right now.';
+      const t = formatTranscript(ctx.transcript, 8);
+      return 'Recent conversation:\n' + (t || '(none)') + '\n\nThe latest Them line is the current trigger. Respond with one useful next step or reply for me, without summarizing.';
     }
   },
 
