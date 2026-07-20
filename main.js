@@ -31,6 +31,14 @@ let assistTurnCount = 0;
 
 function send(channel, data) { if (win && !win.isDestroyed()) win.webContents.send(channel, data); }
 
+const SCREEN_HINTS = ['экран', 'скрин', 'код', 'задач', 'leetcode', 'ошибк', 'сайт', 'страниц', 'кнопк', 'таблиц', 'консол', 'терминал', 'интерфейс', 'формул', 'график'];
+function shouldCaptureScreen(mode, userText) {
+  if (mode === 'leetcode') return true;
+  if (mode !== 'assist' && mode !== 'ask') return false;
+  const context = [userText || '', ...transcript.slice(-6).map((turn) => turn.text)].join(' ').toLowerCase();
+  return SCREEN_HINTS.some((hint) => context.includes(hint));
+}
+
 function toggleWindow() {
   if (!win || win.isDestroyed()) return;
   if (win.isVisible()) win.hide();
@@ -273,7 +281,7 @@ async function runFeature(mode, userText) {
     }
 
     let imageDataUrl = null;
-    if (def.needsScreen) {
+    if (def.needsScreen && shouldCaptureScreen(mode, userText)) {
       if (!state.capturing && !def.screenOptional) {
         send('llm:error', { message: 'Сначала включите запись, чтобы cue получил доступ к экрану.' });
         return;
