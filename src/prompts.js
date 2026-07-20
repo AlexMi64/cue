@@ -23,7 +23,7 @@ const MODES = {
       'Be concise and confident. Never say "I can see" or describe the screenshot.',
     build(ctx) {
       const t = formatTranscript(ctx.transcript, 8);
-      return 'Recent conversation:\n' + (t || '(none)') + '\n\nThe latest Them line is the current trigger. Respond with one useful next step or reply for me, without summarizing.';
+      return 'Recent conversation:\n' + (t || '(none)') + '\n\nThe latest Them line is the current trigger. Respond with one useful next step or reply for me, without summarizing. If it is not a direct question or request to me, return exactly NO_ACTION.';
     }
   },
 

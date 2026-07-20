@@ -35,6 +35,7 @@ const SCREEN_HINTS = ['экран', 'скрин', 'код', 'задач', 'leetc
 function shouldCaptureScreen(mode, userText) {
   if (mode === 'leetcode') return true;
   if (mode !== 'assist' && mode !== 'ask') return false;
+  if (mode === 'assist' && !userText) return false;
   const context = [userText || '', ...transcript.slice(-6).map((turn) => turn.text)].join(' ').toLowerCase();
   return SCREEN_HINTS.some((hint) => context.includes(hint));
 }
@@ -56,8 +57,16 @@ function isDuplicateTurn(channel, text) {
     if (words.size < 4 || previousWords.size < 4) return false;
     let intersection = 0;
     words.forEach((word) => { if (previousWords.has(word)) intersection += 1; });
-    return intersection / (words.size + previousWords.size - intersection) >= 0.78;
+    const similarity = intersection / (words.size + previousWords.size - intersection);
+    const shorter = Math.min(normalized.length, previousNormalized.length);
+    if (channel === previous.channel && shorter >= 18 && (normalized.includes(previousNormalized) || previousNormalized.includes(normalized))) return true;
+    return similarity >= (channel === previous.channel ? 0.55 : 0.78);
   });
+}
+
+function needsReply(text) {
+  const value = text.trim().toLowerCase();
+  return value.includes('?') || /^(что|как|где|когда|почему|зачем|кто|какой|можешь|можно|нужно|будешь|ты\s)/i.test(value) || /\b(подскажи|объясни|помоги|выбери|реши|ответь|что думаешь|как считаешь)\b/i.test(value);
 }
 
 function toggleWindow() {
@@ -164,7 +173,7 @@ async function flushChannel(channel, options = {}) {
         const turn = { channel, text, ts: Date.now() };
         transcript.push(turn);
         send('transcript', turn);
-        if (channel === 'them') scheduleAutoAssist();
+        if (channel === 'them' && needsReply(text)) scheduleAutoAssist();
       }
     } catch (e) {
       console.log('[stt] error', e && e.message);
