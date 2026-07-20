@@ -201,11 +201,11 @@ function setCapturing(active) {
     finalizingGeneration = null;
     sttDisabled = false;
     transcript.length = 0;
+    buffers.you = []; buffers.them = [];
     startFlushLoop();
   } else {
     finalizingGeneration = stoppedGeneration;
     stopFlushLoop();
-    buffers.you = []; buffers.them = [];
   }
   send('capture:state', { active });
   if (stoppedGeneration !== null) {
