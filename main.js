@@ -273,7 +273,8 @@ async function runFeature(mode, userText) {
     const settings = store.getSettings();
     const llm = createLLM(settings, { fast: mode === 'assist', maxTokens: mode === 'assist' ? 450 : undefined });
     const userBubble = def.userBubble !== null ? def.userBubble : (mode === 'ask' ? userText : null);
-    send('llm:start', { userBubble, small: !!def.small });
+    const appendResponse = (mode === 'assist' && assistActive) || mode === 'recap';
+    send('llm:start', { userBubble, small: !!def.small, append: appendResponse, responseLabel: mode === 'recap' ? 'Итог' : 'Помощь' });
 
     if (!llm.ready) {
       send('llm:error', { message: 'Add your ' + settings.provider + ' API key in Settings (gear icon) to start. Model: ' + (llm.model || 'unset') + '.' });

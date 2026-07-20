@@ -21,7 +21,21 @@
     <div id="panel-wrap">
       <span id="live-dot" class="off"></span>
       <div id="panel" class="glass no-drag">
-        <div id="messages"></div>
+        <section id="live-view" aria-label="Живой конспект созвона">
+          <div class="view-head">
+            <span class="view-title">Живой конспект</span>
+            <span id="transcript-count">Нет реплик</span>
+          </div>
+          <div id="live-transcript" role="log" aria-live="polite"></div>
+        </section>
+
+        <section id="answer-view" aria-label="Подсказки Cue">
+          <div class="view-head">
+            <span class="view-title">Подсказки</span>
+            <span id="assist-state">Готово</span>
+          </div>
+          <div id="messages"></div>
+        </section>
 
         <div id="action-row">
           <button class="act" data-mode="assist"><span class="ic"></span><span>Помощь</span></button>

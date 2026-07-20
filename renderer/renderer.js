@@ -24,6 +24,11 @@
   let caretEl = null;
 
   const messages = $('#messages');
+  const liveTranscript = $('#live-transcript');
+  const transcriptCountEl = $('#transcript-count');
+  const assistStateEl = $('#assist-state');
+  let transcriptCount = 0;
+  let messagesFollow = true;
 
   function esc(s) { return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
@@ -51,7 +56,47 @@
     return html;
   }
 
-  function clearMessages() { messages.innerHTML = ''; aiEl = null; caretEl = null; }
+  function clearMessages() { messages.innerHTML = ''; aiEl = null; caretEl = null; messagesFollow = true; }
+
+  messages.addEventListener('scroll', () => {
+    messagesFollow = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 24;
+  });
+
+  function keepMessagesAtBottom() {
+    if (messagesFollow) requestAnimationFrame(() => { messages.scrollTop = messages.scrollHeight; });
+  }
+
+  function clearLiveTranscript() {
+    liveTranscript.innerHTML = '';
+    transcriptCount = 0;
+    transcriptCountEl.textContent = 'Нет реплик';
+  }
+
+  function appendTranscript(turn) {
+    if (!turn || !turn.text) return;
+    const wasAtBottom = liveTranscript.scrollHeight - liveTranscript.scrollTop - liveTranscript.clientHeight < 24;
+    const row = document.createElement('div');
+    row.className = 'transcript-row ' + (turn.channel === 'them' ? 'them' : 'you');
+
+    const meta = document.createElement('div');
+    meta.className = 'transcript-meta';
+    const speaker = document.createElement('span');
+    speaker.className = 'transcript-speaker';
+    speaker.textContent = turn.channel === 'them' ? 'Собеседник' : 'Вы';
+    const time = document.createElement('time');
+    time.className = 'transcript-time';
+    time.textContent = new Date(turn.ts || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    meta.append(speaker, time);
+
+    const text = document.createElement('div');
+    text.className = 'transcript-text';
+    text.textContent = turn.text;
+    row.append(meta, text);
+    liveTranscript.appendChild(row);
+    transcriptCount += 1;
+    transcriptCountEl.textContent = transcriptCount + (transcriptCount === 1 ? ' реплика' : ' реплик');
+    if (wasAtBottom) requestAnimationFrame(() => { liveTranscript.scrollTop = liveTranscript.scrollHeight; });
+  }
 
   function addUserBubble(text) {
     const b = document.createElement('div');
@@ -60,7 +105,13 @@
     messages.appendChild(b);
   }
 
-  function startAi(small) {
+  function startAi(small, label) {
+    if (label) {
+      const marker = document.createElement('div');
+      marker.className = 'answer-label';
+      marker.textContent = label;
+      messages.appendChild(marker);
+    }
     aiEl = document.createElement('div');
     aiEl.className = 'ai-text' + (small ? ' small' : '');
     aiEl.dataset.raw = '';
@@ -68,12 +119,14 @@
     caretEl.className = 'ai-caret';
     aiEl.appendChild(caretEl);
     messages.appendChild(aiEl);
+    keepMessagesAtBottom();
   }
 
   function appendToken(t) {
     if (!aiEl) startAi(false);
     aiEl.dataset.raw += t;
     aiEl.insertBefore(document.createTextNode(t), caretEl);
+    keepMessagesAtBottom();
   }
 
   function finalizeAi() {
@@ -131,7 +184,7 @@
   }
   $('#send-btn').addEventListener('click', send);
   $('#copy-btn').addEventListener('click', async () => {
-    const text = messages.innerText.trim();
+    const text = [liveTranscript.innerText.trim(), messages.innerText.trim()].filter(Boolean).join('\n\n');
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
@@ -239,19 +292,22 @@
   cue.on('capture:state', ({ active }) => {
     $('#live-dot').classList.toggle('off', !active);
     $('#stop-btn').classList.toggle('active', active);
-    if (active) { startMic(); startSystemAudio(); clearMessages(); } else { stopMic(); stopSystemAudio(); }
+    if (active) { startMic(); startSystemAudio(); clearMessages(); clearLiveTranscript(); assistStateEl.textContent = 'Слушаю'; } else { stopMic(); stopSystemAudio(); assistStateEl.textContent = 'Готово'; }
   });
-  cue.on('llm:start', ({ userBubble, small }) => {
-    clearMessages();
-    if (userBubble) addUserBubble(userBubble);
-    startAi(!!small);
+  cue.on('transcript', appendTranscript);
+  cue.on('llm:start', ({ userBubble, small, append, responseLabel }) => {
+    if (append) finalizeAi();
+    else clearMessages();
+    if (userBubble && !append) addUserBubble(userBubble);
+    startAi(!!small, append ? responseLabel : '');
+    assistStateEl.textContent = 'Генерирую';
     setBusy(true);
   });
   cue.on('llm:token', ({ text }) => appendToken(text));
-  cue.on('llm:done', () => { finalizeAi(); setBusy(false); });
+  cue.on('llm:done', () => { finalizeAi(); assistStateEl.textContent = 'Готово'; setBusy(false); });
   cue.on('llm:error', ({ message }) => {
     if (!aiEl) startAi(true);
-    aiEl.dataset.raw = message; finalizeAi(); setBusy(false);
+    aiEl.dataset.raw = message; finalizeAi(); assistStateEl.textContent = 'Ошибка'; setBusy(false);
   });
   let statusTimer = null;
   function showStatus(message) {
