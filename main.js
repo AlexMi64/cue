@@ -158,11 +158,11 @@ function setCapturing(active) {
   state.capturing = active;
   if (active) {
     sttDisabled = false;
+    transcript.length = 0;
     startFlushLoop();
   } else {
     stopFlushLoop();
     buffers.you = []; buffers.them = [];
-    transcript.length = 0;
   }
   send('capture:state', { active });
   return active;
