@@ -20,6 +20,9 @@ const MIN_BYTES = Math.floor(16000 * 2 * 0.6); // ~0.6s
 const RMS_GATE = 240;
 let flushTimer = null;
 let captureGeneration = 0;
+const STOP_DRAIN_MS = 300;
+let finalizingGeneration = null;
+const pendingTranscriptions = { you: null, them: null };
 
 function send(channel, data) { if (win && !win.isDestroyed()) win.webContents.send(channel, data); }
 
@@ -95,39 +98,76 @@ function createWindow() {
 }
 
 // -------- STT flushing --------
-async function flushChannel(channel) {
-  if (state.transcribing[channel]) return;
+async function flushChannel(channel, options = {}) {
+  if (pendingTranscriptions[channel]) return pendingTranscriptions[channel];
   const chunks = buffers[channel];
   if (!chunks.length) return;
-  const generation = captureGeneration;
+  const generation = options.generation === undefined ? captureGeneration : options.generation;
+  const allowStopped = options.allowStopped === true;
+  const allowShort = options.allowShort === true;
   const pcm = Buffer.concat(chunks);
   buffers[channel] = [];
-  if (pcm.length < MIN_BYTES) return;
+  if (pcm.length < MIN_BYTES && !allowShort) return;
   if (rms16(pcm) < RMS_GATE) return; // silence gate
 
   state.transcribing[channel] = true;
+  const task = (async () => {
+    try {
+      const settings = store.getSettings();
+      const stt = createSTT(settings);
+      if (!stt.available) {
+        if (!sttDisabled) { sttDisabled = true; send('status', { message: 'No transcription key set. Add an OpenAI (Whisper) or Gemini key in Settings to enable listening. Screen/LeetCode features work without it.' }); }
+        return;
+      }
+      const res = await stt.transcribe(pcm);
+      if (res.error) {
+        if (generation === captureGeneration && (state.capturing || allowStopped)) handleSttError(res.error, settings);
+        return;
+      }
+      if ((!state.capturing && !allowStopped) || generation !== captureGeneration) return;
+      if (res.text && res.text.trim()) {
+        const turn = { channel, text: res.text.trim(), ts: Date.now() };
+        transcript.push(turn);
+        send('transcript', turn);
+      }
+    } catch (e) {
+      console.log('[stt] error', e && e.message);
+    }
+  })();
+  pendingTranscriptions[channel] = task;
   try {
-    const settings = store.getSettings();
-    const stt = createSTT(settings);
-    if (!stt.available) {
-      if (!sttDisabled) { sttDisabled = true; send('status', { message: 'No transcription key set. Add an OpenAI (Whisper) or Gemini key in Settings to enable listening. Screen/LeetCode features work without it.' }); }
-      return;
-    }
-    const res = await stt.transcribe(pcm);
-    if (res.error) {
-      handleSttError(res.error, settings);
-      return;
-    }
-    if (!state.capturing || generation !== captureGeneration) return;
-    if (res.text && res.text.trim()) {
-      const turn = { channel, text: res.text.trim(), ts: Date.now() };
-      transcript.push(turn);
-      send('transcript', turn);
-    }
-  } catch (e) {
-    console.log('[stt] error', e && e.message);
+    await task;
   } finally {
+    if (pendingTranscriptions[channel] === task) pendingTranscriptions[channel] = null;
     state.transcribing[channel] = false;
+  }
+}
+
+async function waitForTranscriptions() {
+  const pending = Object.values(pendingTranscriptions).filter(Boolean);
+  if (pending.length) await Promise.all(pending);
+}
+
+async function finalizeCapture(generation) {
+  try {
+    await new Promise((resolve) => setTimeout(resolve, STOP_DRAIN_MS));
+    await waitForTranscriptions();
+    if (state.capturing || generation !== captureGeneration) return;
+
+    await Promise.all([
+      flushChannel('you', { generation, allowStopped: true, allowShort: true }),
+      flushChannel('them', { generation, allowStopped: true, allowShort: true })
+    ]);
+    if (state.capturing || generation !== captureGeneration) return;
+
+    if (!transcript.length) {
+      send('status', { message: 'Не удалось распознать речь для итогов созвона.' });
+      return;
+    }
+    send('status', { message: 'Транскрипция готова. Готовлю итог созвона...' });
+    await runFeature('recap', '');
+  } finally {
+    if (finalizingGeneration === generation) finalizingGeneration = null;
   }
 }
 
@@ -156,15 +196,22 @@ function stopFlushLoop() { if (flushTimer) { clearInterval(flushTimer); flushTim
 function setCapturing(active) {
   captureGeneration += 1;
   state.capturing = active;
+  const stoppedGeneration = active ? null : captureGeneration;
   if (active) {
+    finalizingGeneration = null;
     sttDisabled = false;
     transcript.length = 0;
     startFlushLoop();
   } else {
+    finalizingGeneration = stoppedGeneration;
     stopFlushLoop();
     buffers.you = []; buffers.them = [];
   }
   send('capture:state', { active });
+  if (stoppedGeneration !== null) {
+    send('status', { message: 'Запись остановлена. Догружаю последние фразы...' });
+    finalizeCapture(stoppedGeneration).catch((e) => console.log('[recap] error', e && e.message));
+  }
   return active;
 }
 
@@ -216,8 +263,8 @@ ipcMain.handle('settings:set', (_e, patch) => { sttDisabled = false; return stor
 ipcMain.handle('capture:toggle', () => setCapturing(!state.capturing));
 ipcMain.handle('capture:state', () => ({ active: state.capturing }));
 ipcMain.on('ask', (_e, payload) => runFeature(payload.mode, payload.text));
-ipcMain.on('mic:pcm', (_e, arrayBuffer) => { if (state.capturing) buffers.you.push(Buffer.from(arrayBuffer)); });
-ipcMain.on('system:pcm', (_e, arrayBuffer) => { if (state.capturing) buffers.them.push(Buffer.from(arrayBuffer)); });
+ipcMain.on('mic:pcm', (_e, arrayBuffer) => { if (state.capturing || finalizingGeneration === captureGeneration) buffers.you.push(Buffer.from(arrayBuffer)); });
+ipcMain.on('system:pcm', (_e, arrayBuffer) => { if (state.capturing || finalizingGeneration === captureGeneration) buffers.them.push(Buffer.from(arrayBuffer)); });
 ipcMain.on('mouse:ignore', (_e, v) => { if (win) win.setIgnoreMouseEvents(!!v, { forward: true }); });
 ipcMain.on('open-pane', (_e, url) => { shell.openExternal(url).catch(() => {}); });
 ipcMain.on('settings:open', () => send('settings:open'));

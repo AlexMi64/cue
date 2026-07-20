@@ -57,7 +57,7 @@ const MODES = {
   // Recap of the whole session.
   recap: {
     needsScreen: false,
-    userBubble: 'Recap',
+    userBubble: 'Итог созвона',
     small: true,
     system:
       'You are cue. Summarize the conversation so far for someone who joined late: ' +
