@@ -160,6 +160,7 @@ button:focus { outline: none; }
 }
 .act .ic { display: inline-flex; color: var(--ic); }
 .act:hover { color: #fff; background: rgba(255,255,255,0.06); }
+.act.active { color: #fff; background: rgba(72, 139, 255, 0.18); box-shadow: 0 0 0 1px rgba(72, 139, 255, 0.28); }
 .act:active { transform: translateY(0.5px); }
 .act:disabled { opacity: 0.5; cursor: default; }
 .sep { color: rgba(255,255,255,0.35); font-size: 14px; margin: 0 2px; }

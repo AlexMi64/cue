@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('cue', {
   settingsGet: () => ipcRenderer.invoke('settings:get'),
   settingsSet: (patch) => ipcRenderer.invoke('settings:set', patch),
   ask: (payload) => ipcRenderer.send('ask', payload),
+  assistToggle: () => ipcRenderer.invoke('assist:toggle'),
   captureToggle: () => ipcRenderer.invoke('capture:toggle'),
   captureState: () => ipcRenderer.invoke('capture:state'),
   micPcm: (arrayBuffer) => ipcRenderer.send('mic:pcm', arrayBuffer),

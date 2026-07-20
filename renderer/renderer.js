@@ -92,8 +92,21 @@
     cue.ask({ mode, text: text || '' });
   }
 
+  const assistBtn = document.querySelector('.act[data-mode="assist"]');
+  function syncAssistMode(active) {
+    assistBtn.classList.toggle('active', active);
+    assistBtn.setAttribute('aria-pressed', String(active));
+  }
+
   document.querySelectorAll('.act').forEach((btn) => {
-    btn.addEventListener('click', () => runMode(btn.dataset.mode, ''));
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.mode === 'assist') {
+        const active = await cue.assistToggle();
+        syncAssistMode(active);
+        return;
+      }
+      runMode(btn.dataset.mode, '');
+    });
   });
 
   const input = $('#input');

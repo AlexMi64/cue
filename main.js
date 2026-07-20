@@ -23,6 +23,11 @@ let captureGeneration = 0;
 const STOP_DRAIN_MS = 300;
 let finalizingGeneration = null;
 const pendingTranscriptions = { you: null, them: null };
+const ASSIST_IDLE_MS = 1200;
+let assistActive = false;
+let assistTimer = null;
+let assistQueued = false;
+let assistTurnCount = 0;
 
 function send(channel, data) { if (win && !win.isDestroyed()) win.webContents.send(channel, data); }
 
@@ -129,6 +134,7 @@ async function flushChannel(channel, options = {}) {
         const turn = { channel, text: res.text.trim(), ts: Date.now() };
         transcript.push(turn);
         send('transcript', turn);
+        scheduleAutoAssist();
       }
     } catch (e) {
       console.log('[stt] error', e && e.message);
@@ -146,6 +152,35 @@ async function flushChannel(channel, options = {}) {
 async function waitForTranscriptions() {
   const pending = Object.values(pendingTranscriptions).filter(Boolean);
   if (pending.length) await Promise.all(pending);
+}
+
+function scheduleAutoAssist() {
+  clearTimeout(assistTimer);
+  if (!assistActive || !state.capturing) return;
+  assistTimer = setTimeout(() => {
+    assistTimer = null;
+    if (!assistActive || !state.capturing || transcript.length <= assistTurnCount) return;
+    if (state.busy) {
+      assistQueued = true;
+      return;
+    }
+    assistTurnCount = transcript.length;
+    runFeature('assist', '');
+  }, ASSIST_IDLE_MS);
+}
+
+function setAssistActive(active) {
+  assistActive = active;
+  assistQueued = false;
+  clearTimeout(assistTimer);
+  assistTimer = null;
+  if (active) {
+    assistTurnCount = transcript.length;
+    send('status', { message: 'Помощь в реальном времени включена.' });
+  } else {
+    send('status', { message: 'Помощь в реальном времени выключена.' });
+  }
+  return active;
 }
 
 async function finalizeCapture(generation) {
@@ -202,9 +237,14 @@ function setCapturing(active) {
     sttDisabled = false;
     transcript.length = 0;
     buffers.you = []; buffers.them = [];
+    assistTurnCount = 0;
+    assistQueued = false;
     startFlushLoop();
   } else {
     finalizingGeneration = stoppedGeneration;
+    clearTimeout(assistTimer);
+    assistTimer = null;
+    assistQueued = false;
     stopFlushLoop();
   }
   send('capture:state', { active });
@@ -223,7 +263,7 @@ async function runFeature(mode, userText) {
   state.busy = true;
   try {
     const settings = store.getSettings();
-    const llm = createLLM(settings);
+    const llm = createLLM(settings, { fast: mode === 'assist', maxTokens: mode === 'assist' ? 450 : undefined });
     const userBubble = def.userBubble !== null ? def.userBubble : (mode === 'ask' ? userText : null);
     send('llm:start', { userBubble, small: !!def.small });
 
@@ -256,12 +296,17 @@ async function runFeature(mode, userText) {
     send('llm:error', { message: 'Error: ' + (e && e.message ? e.message : String(e)) });
   } finally {
     state.busy = false;
+    if (mode === 'assist' && assistActive && state.capturing && assistQueued) {
+      assistQueued = false;
+      scheduleAutoAssist();
+    }
   }
 }
 
 // -------- IPC --------
 ipcMain.handle('settings:get', () => store.getSettings());
 ipcMain.handle('settings:set', (_e, patch) => { sttDisabled = false; return store.setSettings(patch); });
+ipcMain.handle('assist:toggle', () => setAssistActive(!assistActive));
 ipcMain.handle('capture:toggle', () => setCapturing(!state.capturing));
 ipcMain.handle('capture:state', () => ({ active: state.capturing }));
 ipcMain.on('ask', (_e, payload) => runFeature(payload.mode, payload.text));

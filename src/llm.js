@@ -58,14 +58,14 @@ async function streamGemini(args) {
   return streamOpenAI(args);
 }
 
-function createLLM(settings) {
+function createLLM(settings, options = {}) {
   const provider = settings.provider;
   const keys = settings.apiKeys || {};
   const apiKey = keys[provider];
-  const tier = settings.smart ? 'smart' : 'fast';
+  const tier = options.fast ? 'fast' : (settings.smart ? 'smart' : 'fast');
   const model = (settings.models[provider] || {})[tier];
   const baseURL = (settings.baseURLs && settings.baseURLs[provider]) || undefined;
-  const maxTokens = settings.smart ? 1400 : 700;
+  const maxTokens = options.maxTokens || (tier === 'smart' ? 1400 : 700);
   const languageRule = 'Отвечай только на русском языке. Английский используй только внутри кода, команд, названий технологий, API и других неизменяемых технических идентификаторов.';
 
   return {

@@ -15,7 +15,13 @@ async function captureScreenshot() {
   const src = sources.find((s) => String(s.display_id) === String(primary.id)) || sources[0];
   const img = src.thumbnail;
   if (!img || img.isEmpty()) return null;
-  return img.toDataURL(); // data:image/png;base64,...
+  const size = img.getSize();
+  const maxDimension = 1600;
+  const resizeScale = Math.min(1, maxDimension / Math.max(size.width, size.height));
+  const optimized = resizeScale < 1
+    ? img.resize({ width: Math.round(size.width * resizeScale), height: Math.round(size.height * resizeScale) })
+    : img;
+  return 'data:image/jpeg;base64,' + optimized.toJPEG(82).toString('base64');
 }
 
 module.exports = { captureScreenshot };
