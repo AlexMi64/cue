@@ -19,6 +19,7 @@ const FLUSH_MS = 3500;
 const MIN_BYTES = Math.floor(16000 * 2 * 0.6); // ~0.6s
 const RMS_GATE = 240;
 let flushTimer = null;
+let captureGeneration = 0;
 
 function send(channel, data) { if (win && !win.isDestroyed()) win.webContents.send(channel, data); }
 
@@ -98,6 +99,7 @@ async function flushChannel(channel) {
   if (state.transcribing[channel]) return;
   const chunks = buffers[channel];
   if (!chunks.length) return;
+  const generation = captureGeneration;
   const pcm = Buffer.concat(chunks);
   buffers[channel] = [];
   if (pcm.length < MIN_BYTES) return;
@@ -116,6 +118,7 @@ async function flushChannel(channel) {
       handleSttError(res.error, settings);
       return;
     }
+    if (!state.capturing || generation !== captureGeneration) return;
     if (res.text && res.text.trim()) {
       const turn = { channel, text: res.text.trim(), ts: Date.now() };
       transcript.push(turn);
@@ -151,12 +154,15 @@ function stopFlushLoop() { if (flushTimer) { clearInterval(flushTimer); flushTim
 // getDisplayMedia loopback for system audio) so they run inside cue's own process
 // and use cue's own Screen-Recording grant — no separate helper binary to authorize.
 function setCapturing(active) {
+  captureGeneration += 1;
   state.capturing = active;
   if (active) {
+    sttDisabled = false;
     startFlushLoop();
   } else {
     stopFlushLoop();
     buffers.you = []; buffers.them = [];
+    transcript.length = 0;
   }
   send('capture:state', { active });
   return active;

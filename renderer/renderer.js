@@ -226,7 +226,7 @@
   cue.on('capture:state', ({ active }) => {
     $('#live-dot').classList.toggle('off', !active);
     $('#stop-btn').classList.toggle('active', active);
-    if (active) { startMic(); startSystemAudio(); } else { stopMic(); stopSystemAudio(); }
+    if (active) { startMic(); startSystemAudio(); } else { stopMic(); stopSystemAudio(); clearMessages(); }
   });
   cue.on('llm:start', ({ userBubble, small }) => {
     clearMessages();
