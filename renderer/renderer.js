@@ -13,6 +13,7 @@
   document.querySelector('.act[data-mode="followup"] .ic').innerHTML = icon('message-circle', { size: 16 });
   document.querySelector('.act[data-mode="recap"] .ic').innerHTML = icon('refresh-cw', { size: 16 });
   $('#smart-toggle .ic').innerHTML = icon('zap', { size: 14 });
+  $('#copy-btn').innerHTML = icon('copy', { size: 16 });
   $('#more-btn').innerHTML = icon('more-horizontal', { size: 18 });
   $('#send-btn').innerHTML = icon('play', { size: 15 });
 
@@ -72,10 +73,7 @@
   function appendToken(t) {
     if (!aiEl) startAi(false);
     aiEl.dataset.raw += t;
-    const span = document.createElement('span');
-    span.className = 'w';
-    span.textContent = t;
-    aiEl.insertBefore(span, caretEl);
+    aiEl.insertBefore(document.createTextNode(t), caretEl);
   }
 
   function finalizeAi() {
@@ -119,6 +117,19 @@
     runMode('ask', text);
   }
   $('#send-btn').addEventListener('click', send);
+  $('#copy-btn').addEventListener('click', async () => {
+    const text = messages.innerText.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      showStatus('Сообщения скопированы');
+    } catch (err) {
+      const area = document.createElement('textarea');
+      area.value = text; document.body.appendChild(area); area.select();
+      document.execCommand('copy'); area.remove();
+      showStatus('Сообщения скопированы');
+    }
+  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.metaKey) { e.preventDefault(); send(); }
     if (e.key === 'Enter' && e.metaKey) { e.preventDefault(); runMode('assist', ''); }
