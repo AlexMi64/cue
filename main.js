@@ -83,8 +83,8 @@ function createWindow() {
 
   // Invisibility + overlay behavior. Set CUE_NO_PROTECT=1 to disable for debugging.
   win.setContentProtection(!process.env.CUE_NO_PROTECT);            // excluded from screen capture (best-effort)
-  win.setAlwaysOnTop(true, 'screen-saver', 1);
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.setAlwaysOnTop(true, process.platform === 'darwin' ? 'screen-saver' : 'floating', 1);
+  if (process.platform === 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   if (typeof win.setHiddenInMissionControl === 'function') win.setHiddenInMissionControl(true);
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -224,7 +224,7 @@ function registerShortcuts() {
 
 // -------- lifecycle --------
 app.whenReady().then(() => {
-  if (app.dock) app.dock.hide();
+  if (process.platform === 'darwin' && app.dock) app.dock.hide();
 
   const allowMedia = (permission) => permission === 'media' || permission === 'microphone' || permission === 'audioCapture' || permission === 'display-capture';
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(allowMedia(permission)));
