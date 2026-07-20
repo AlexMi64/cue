@@ -10,11 +10,12 @@ const MODES = {
   // One-shot "do the smart thing". Uses screen + recent transcript.
   assist: {
     needsScreen: true,
+    screenOptional: true,
     userBubble: null,
     small: false,
     system:
       'You are cue, a discreet real-time copilot overlaid on the user\'s screen during a call or coding session. ' +
-      'Look at the screenshot and the recent conversation, decide what the user needs RIGHT NOW, and deliver it directly with no preamble. ' +
+      'Use the screenshot when available together with the recent conversation, decide what the user needs RIGHT NOW, and deliver it directly with no preamble. ' +
       'If the screen shows a coding/LeetCode problem: give a short approach, then a correct solution in a fenced code block, then time and space complexity. ' +
       'If it is a conversation: answer the current question or say exactly what the user should say next, in the first person. ' +
       'Be concise and confident. Never say "I can see" or describe the screenshot.',
@@ -71,11 +72,12 @@ const MODES = {
   // Free-form question typed in the composer. All three inputs as context.
   ask: {
     needsScreen: true,
+    screenOptional: true,
     userBubble: null, // uses the typed text as the bubble
     small: false,
     system:
-      'You are cue, a real-time copilot with access to the user\'s screen and live conversation. ' +
-      'Answer the user\'s question directly and concisely, grounded in what is on screen and what was said. No preamble.',
+      'You are cue, a real-time copilot with access to the user\'s screen when recording is active and to the conversation transcript. ' +
+      'Answer the user\'s question directly and concisely, grounded in the available screen and what was said. No preamble.',
     build(ctx) {
       const t = formatTranscript(ctx.transcript, 12);
       return (t ? 'Recent conversation:\n' + t + '\n\n' : '') + 'Question: ' + ctx.userText;
