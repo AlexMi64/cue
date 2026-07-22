@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, screen, session, desktopCapturer, shell } = require('electron');
+const { execFile } = require('child_process');
 const path = require('path');
 const store = require('./src/store');
 const { captureScreenshot } = require('./src/screen');
@@ -6,6 +7,7 @@ const { createSTT } = require('./src/stt');
 const { createLLM } = require('./src/llm');
 const { MODES } = require('./src/prompts');
 const { rms16 } = require('./src/wav');
+const { saveRecap } = require('./src/recap-export');
 
 let win = null;
 let tray = null;
@@ -263,6 +265,20 @@ function startFlushLoop() {
 }
 function stopFlushLoop() { if (flushTimer) { clearInterval(flushTimer); flushTimer = null; } }
 
+function openRecapInMarkEdit(filePath) {
+  if (process.platform !== 'darwin') {
+    shell.openPath(filePath).catch((error) => console.log('[recap] open error', error && error.message));
+    return;
+  }
+
+  execFile('/usr/bin/open', ['-a', 'MarkEdit', filePath], (error) => {
+    if (!error) return;
+    // MarkEdit may not be installed or may not be registered by its bundle name.
+    // Opening through the default file association still makes the export useful.
+    shell.openPath(filePath).catch((fallbackError) => console.log('[recap] open error', fallbackError && fallbackError.message));
+  });
+}
+
 // -------- capture toggle --------
 // Mic + system audio are both captured in the RENDERER (getUserMedia for the mic,
 // getDisplayMedia loopback for system audio) so they run inside cue's own process
@@ -332,7 +348,22 @@ async function runFeature(mode, userText) {
       onToken: (t) => send('llm:token', { text: t })
     });
     const suppress = mode === 'assist' && /^NO_ACTION[.!]?$/i.test(String(output || '').trim());
-    send('llm:done', { suppress });
+    let savedRecap = null;
+    if (mode === 'recap' && output && String(output).trim()) {
+      try {
+        savedRecap = await saveRecap({
+          documentsPath: app.getPath('documents'),
+          summary: output,
+          transcript: [...transcript]
+        });
+        send('status', { message: `Итог сохранён: ${savedRecap.fileName}` });
+        openRecapInMarkEdit(savedRecap.filePath);
+      } catch (error) {
+        console.log('[recap] save error', error && error.message);
+        send('status', { message: 'Итог готов, но не удалось сохранить Markdown-файл.' });
+      }
+    }
+    send('llm:done', { suppress, recapFile: savedRecap && savedRecap.filePath });
   } catch (e) {
     send('llm:error', { message: 'Error: ' + (e && e.message ? e.message : String(e)) });
   } finally {

@@ -64,7 +64,8 @@ const MODES = {
     small: true,
     system:
       'You are cue. Summarize the conversation so far for someone who joined late: ' +
-      'a few key points, any decisions, and action items. Use short bullets under bold headers. Be brief.',
+      'Start with one concise Markdown H1 title that captures the main topic of the conversation. ' +
+      'Then give a few key points, any decisions, and action items using short bullets under bold headers. Be brief.',
     build(ctx) {
       const t = formatTranscript(ctx.transcript, 0);
       return 'Full transcript:\n' + (t || '(nothing captured yet)') + '\n\nRecap this.';
